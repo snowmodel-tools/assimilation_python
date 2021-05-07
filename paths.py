@@ -10,18 +10,9 @@ import requests
 domain = 'WY'
 #################################################
 
-############# General CSO info ##################
-#CSO data path
-CSOpath = 'cso-data.geojson'
 
 #assimilation files 
-assimPath = '/nfs/attic/dfh/Aragon2/CSOassim/'+domain+'/'
-
-# Figure path
-figpath = '/nfs/attic/dfh/Aragon2/CSOfigs/'+domain+'/'
-
-#geojson of all snotel stations in domain
-gdf = gpd.read_file('/nfs/attic/dfh/Aragon2/CSOdata/'+domain+'/CSO_SNOTEL_sites.geojson')
+assimPath = 'extra/'
 
 #path to CSO domain
 domains_resp = requests.get("https://raw.githubusercontent.com/snowmodel-tools/preprocess_python/master/CSO_domains.json")
@@ -41,20 +32,15 @@ stn_proj = domains[domain]['stn_proj']
 # CSO projection
 mod_proj = domains[domain]['mod_proj']
 
-# number of columns in domain
-nx = int(domains[domain]['ncols'])
-# number of rows in domain
-ny = int(domains[domain]['nrows'])
-
 # dem path
-dem_path = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/DEM_'+domain+'.tif'
+dem_path = 'topo_vege/DEM_'+domain+'.tif'
 
 # nlcd path
-lc_path = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/NLCD2016_'+domain+'.tif'
+lc_path = 'topo_vege/NLCD2016_'+domain+'.tif'
 
 ##################### SM ######################
 #path to SM
-SMpath = '/nfs/attic/dfh/Aragon2/WY_scratch/jan2021_snowmodel-dfhill_all/'
+SMpath = '/nfs/attic/dfh/Aragon2/WY_scratch/jan2021_snowmodel-dfhill_elev/'
 #path to SM .f files
 codepath = SMpath+'code'
 #path to.inc file
@@ -65,14 +51,22 @@ incFile = SMpath+'code/snowmodel.inc'
 
 ################# Assimilation #################
 
+
 #path to SM outputs on scratch
 SMout_scrach = SMpath+domain+'/'
 
-#path to baseline SM run
-SM_noassim = SMpath + 'outputs/wo_assim/swed.gdat'
-
 #evaluation snotel sites 
-snotel_eval_sites = gpd.read_file(assimPath + 'eval_snotel.geojson')
+snotel_eval_sites = gpd.read_file(SMpath+ 'extra/eval_snotel.geojson')
 
 #assimilation snotel stations
-snotel_assim_sites = gpd.read_file(assimPath + 'assim_snotel_sites.geojson')
+snotel_assim_sites = gpd.read_file(SMpath+ 'extra/assim_snotel_sites.geojson')
+
+#gdat path
+gdat_out_path = '/scratch/Nina/WY_gdat/'
+
+############# General CSO info ##################
+#CSO data path
+CSOpath = SMpath+'extra/cso-data.geojson'
+
+#geojson of all snotel stations in domain
+gdf = gpd.read_file(SMpath+'extra/CSO_SNOTEL_sites.geojson')
