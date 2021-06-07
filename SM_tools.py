@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely import geometry as sgeom
+from affine import Affine
 import ulmo
 import json
 import datetime
@@ -630,7 +631,7 @@ def point_index_from_grid(gdf,dem_path):
 
 
 #function to extract time series from SM .gdat at station location
-def get_mod_output(inFile,num_timesteps,nx,ny):
+def get_mod_output(inFile,num_timesteps,ny,nx):
     '''
     inFile: path to swe .gdat from SM
     num_timesteps: number of days in model simulation 
@@ -647,7 +648,7 @@ def get_mod_output(inFile,num_timesteps,nx,ny):
     #close grads file 
     grads_data.close()
     #reshape the data
-    numpy_data = np.reshape(numpy_data,(num_timesteps,nx,ny))
+    numpy_data = np.reshape(numpy_data,(num_timesteps,ny,nx))
 
     return numpy_data
 
