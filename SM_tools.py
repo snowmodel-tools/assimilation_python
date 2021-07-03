@@ -226,7 +226,60 @@ def make_SMassim_file_snotel(sample,new,outFpath):
     f.close() 
 
 
-# In[ ]:
+def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
+    f= open(outFpath,"w+")
+    
+    #determine number of days with observations to assimilate
+    if STswe.shape[1]>0:
+        uq_day = np.unique(np.concatenate((STswe.index.date,CSOdata.dt.dt.date.values)))
+        f.write('{:02.0f}\n'.format(len(uq_day)))
+    else:
+        uq_day = np.unique(CSOdata.dt.dt.date.values)
+        f.write('{:02.0f}\n'.format(len(uq_day)))
+    
+    # determine snotel stations 
+    stn = list(STswe.columns)
+    
+    # ids for CSO observations - outside of loop so each observation is unique
+    IDS = 500
+    
+    #add assimilation observations to output file
+    for i in range(len(uq_day)):
+
+        SThoy = STswe[STswe.index.date == uq_day[i]]
+        CSOhoy = CSOdata[CSOdata.dt.dt.date.values == uq_day[i]]
+
+        d=uq_day[i].day
+        m=uq_day[i].month
+        y=uq_day[i].year
+
+        date = str(y)+' '+str(m)+' '+str(d)
+
+        stn_count = len(stn) + len(CSOhoy)
+        
+        if stn_count > 0:
+            f.write(date+' \n')
+            f.write(str(stn_count)+' \n')
+
+        #go through snotel stations for that day 
+        ids = 100
+        if len(SThoy) > 0:
+            for k in stn:
+                ids = ids + 1 
+                x = STmeta.easting.values[STmeta.code.values == k][0]
+                y = STmeta.northing.values[STmeta.code.values == k][0]
+                swe = SThoy[k].values[0]
+                f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))    
+        #go through cso obs for that day 
+        if len(CSOhoy) > 0:
+            for c in range(len(CSOhoy)):
+                IDS = IDS + 1 
+                x= CSOhoy.x[CSOhoy.index[c]]
+                y=CSOhoy.y[CSOhoy.index[c]]
+                swe=CSOhoy.swe[CSOhoy.index[c]]
+                f.write('{:3.0f}\t'.format(IDS)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
+    f.close()
+    return len(uq_day)
 
 
 # function to edit SnowModel Files other than .par
@@ -553,7 +606,7 @@ def SMassim_ensemble_snotel(gdf,snotel_gdf,swes,var,path):
             get_ipython().system('mv $oSWEpath $nSWEpath  ')
     elif var == 'M':
         new = snotel_gdf
-        mo = np.unique(swes.index.month)
+        mo = [11,12,1,2,3,4,5]#np.unique(STswe.index.month)
         for m in mo:
             sample = swes[swes.index.month == m]
             make_SMassim_file_snotel(sample,new,outFpath)
