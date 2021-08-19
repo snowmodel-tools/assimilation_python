@@ -85,7 +85,7 @@ def swe_calc(gdf):
     #Determine day of year
     dates = pd.to_datetime(gdf.timestamp, format='%Y-%m-%dT%H:%M:%S').dt.date.values
     DOY = [date.toordinal(date(dts.year,dts.month,dts.day))-date.toordinal(date(dts.year,9,30)) for dts in dates]
-    DOY = np.array([doy + 365 for doy in DOY if doy < 0])
+    DOY = np.array([doy + 365 if doy < 0 else doy for doy in DOY])
     #Apply regression equation 
     a = [0.0533,0.948,0.1701,-0.1314,0.2922] #accumulation phase
     b = [0.0481,1.0395,0.1699,-0.0461,0.1804]; #ablation phase
