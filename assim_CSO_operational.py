@@ -45,7 +45,7 @@ ed_dt = '2019-02-05'
 
 # ASSIM OPTIONS
 # can be set to 'cso', 'both' or 'snotel'
-assim_mod = 'both'
+assim_mod = 'snotel'
 #########################################################################
 
 # Date setup function
@@ -515,29 +515,53 @@ elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
     snotel_gdf = get_snotel_stns(domain)
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
-    make_SMassim_file_snotel(swe,SNOTELgdf,outFpath)
-    #edit .inc file
-    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(swe)+1)+')\n')
-    #compile SM        
-    get_ipython().run_line_magic('cd', '$codepath')
-    get_ipython().system(' ./compile_snowmodel.script')
-    #run snowmodel 
-    get_ipython().run_line_magic('cd', '$SMpath')
-    get_ipython().system(' ./snowmodel')
+    delta = 5
+    sample = swe.iloc[::delta,:]
+    make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
+#    make_SMassim_file_snotel(swe,SNOTELgdf,outFpath) #assim all days
+#     #edit .inc file
+#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(swe)+1)+')\n')
+#     #compile SM        
+#     get_ipython().run_line_magic('cd', '$codepath')
+#     get_ipython().system(' ./compile_snowmodel.script')
+#     #run snowmodel 
+#     get_ipython().run_line_magic('cd', '$SMpath')
+#     get_ipython().system(' ./snowmodel')
+
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
     CSOgdf = get_cso(stdt, eddt, domain)
+    CSOdata = CSOgdf.sort_values(by='dt',ascending=True)
+    CSOdata = CSOdata.reset_index(drop=True)
+    # set delta time 
+    delta = 5
+    # index list
+    idx = [0]
+    st = CSOdata.dt[0]
+    for i in range(1,len(CSOdata)-1):
+        date = CSOdata.dt.iloc[i]
+        gap = (date - st).days
+        if gap<=delta:
+            continue
+        else:
+            idx.append(i)
+            st = date
+    newCSO = CSOdata[CSOdata.index.isin(idx)]
+    
     snotel_gdf = get_snotel_stns(domain)
-    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
-    num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath)
-    #edit .inc file
-    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
-    #compile SM
-    get_ipython().run_line_magic('cd', '$codepath')
-    get_ipython().system(' ./compile_snowmodel.script')
-    #run snowmodel
-    get_ipython().run_line_magic('cd', '$SMpath')
-    get_ipython().system(' ./snowmodel')
+    SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+    newST = SNOTELgdf
+    newSTswe = STswe[STswe.index.isin(newCSO.dt)]
+    num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+#    num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath) #if want to use all observations 
+#     #edit .inc file
+#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+#     #compile SM
+#     get_ipython().run_line_magic('cd', '$codepath')
+#     get_ipython().system(' ./compile_snowmodel.script')
+#     #run snowmodel
+#     get_ipython().run_line_magic('cd', '$SMpath')
+#     get_ipython().system(' ./snowmodel')
 else:
     print('enter valid assim mode')
-    
+ 
