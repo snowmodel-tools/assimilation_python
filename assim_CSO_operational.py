@@ -40,12 +40,12 @@ date_flag = 'manual'
 # If you choose 'manual' set your dates below  
 # This will start on the 'begin' date at 0:00 and the last iteration will 
 # be at 18:00 on the day of the 'end' date below.
-st_dt = '2019-02-01'
-ed_dt = '2019-02-05'
+st_dt = '2019-08-01'
+ed_dt = '2019-08-05'
 
 # ASSIM OPTIONS
 # can be set to 'cso', 'both' or 'snotel'
-assim_mod = 'both'
+assim_mod = 'cso'
 #########################################################################
 
 # Date setup function
@@ -453,44 +453,6 @@ value = str((datetime.strptime(eddt,'%Y-%m-%d')-datetime.strptime(stdt,'%Y-%m-%d
 #print('Number of timesteps =',value)
 replace_line(parFile,11,value +'			!max_iter - number of model time steps\n')
 
-#function to make SM assim file based on selected landscape characteristic
-#var can be 'all',elev','slope','tc','delta_day','M', 'lc', 'aspect'
-
-# def SMassim_ensemble(gdf,var,SMpath):
-#     '''
-#     gdf: this is the geodataframe containing all CSO obs taken over the time period of interest
-#     var: this is the landscape characteristic that will be made into an assimilation ensemble 
-#         'all': assimilate all inputs to SM
-#         'elev': assimilate each of n elevation bands. 
-#             Default = breaks elevation range into 5 bands
-#         'slope': assimilate each of n slope bands. 
-#             Default = breaks slope range into 5 bands
-#         'tc': assimilate each of n terrain complexity score bands. 
-#             Default = breaks tc score range into 5 bands
-#         'delta_day': sets a minimum number of days between assimilated observations. 
-#             -> only 1 observation is selected each day
-#         'M': assimilate data from each month
-#         'lc': assimilate data from each land cover class
-#         'aspect': assimilate data from each aspect N, E, S, W
-#     '''
-#     #create directory with initiation date for ensemble if it doesn't exist
-#     outFpath = SMpath+'swe_assim/swe_obs_test.dat'
-#     codepath = SMpath+'/code/'
-#     incFile = SMpath+'code/snowmodel.inc'
-#     if var == 'all':
-#         new = gdf
-#         make_SMassim_file(new,outFpath)
-#         #edit .inc file
-#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(new)+1)+')\n')
-#         #compile SM
-#         get_ipython().run_line_magic('cd', '$codepath')
-#         get_ipython().system(' ./compile_snowmodel.script')
-#         #run snowmodel 
-#         get_ipython().run_line_magic('cd', '$SMpath')
-#         get_ipython().system(' ./snowmodel')
-
-#     SMassim_ensemble(CSOgdf,setvar,SMpath)
-
 
 # Run SM with CSO assim
 
@@ -499,9 +461,14 @@ codepath = SMpath+'/code/'
 incFile = SMpath+'code/snowmodel.inc'
 
 if assim_mod == 'cso':
-    print('Creating assim input file using CSO observations')
     CSOgdf = get_cso(stdt, eddt, domain)
-    make_SMassim_file(CSOgdf,outFpath)
+    if len(CSOgdf) < 1:
+        print('Executing SnowModel without assimilation')
+        replace_line(parFile,35,'0			!irun_data_assim - 0 for straight run; 1 for assim run\n')      
+    else:    
+        print('Creating assim input file using CSO observations')
+        replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')  
+        make_SMassim_file(CSOgdf,outFpath)
     #edit .inc file
     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf)+1)+')\n')
     #compile SM
@@ -515,7 +482,10 @@ elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
     snotel_gdf = get_snotel_stns(domain)
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
-    make_SMassim_file_snotel(swe,SNOTELgdf,outFpath)
+    delta = 5
+    sample = swe.iloc[::delta,:]
+    make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
+    #make_SMassim_file_snotel(swe,SNOTELgdf,outFpath) #assim all days
     #edit .inc file
     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(swe)+1)+')\n')
     #compile SM        
@@ -524,12 +494,33 @@ elif assim_mod == 'snotel':
     #run snowmodel 
     get_ipython().run_line_magic('cd', '$SMpath')
     get_ipython().system(' ./snowmodel')
+
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
     CSOgdf = get_cso(stdt, eddt, domain)
+    CSOdata = CSOgdf.sort_values(by='dt',ascending=True)
+    CSOdata = CSOdata.reset_index(drop=True)
+    # set delta time 
+    delta = 5
+    # index list
+    idx = [0]
+    st = CSOdata.dt[0]
+    for i in range(1,len(CSOdata)-1):
+        date = CSOdata.dt.iloc[i]
+        gap = (date - st).days
+        if gap<=delta:
+            continue
+        else:
+            idx.append(i)
+            st = date
+    newCSO = CSOdata[CSOdata.index.isin(idx)]
+    
     snotel_gdf = get_snotel_stns(domain)
-    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
-    num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath)
+    SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+    newST = SNOTELgdf
+    newSTswe = STswe[STswe.index.isin(newCSO.dt)]
+    num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+    #num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath) #if want to use all observations 
     #edit .inc file
     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
     #compile SM
@@ -539,5 +530,5 @@ elif assim_mod == 'both':
     get_ipython().run_line_magic('cd', '$SMpath')
     get_ipython().system(' ./snowmodel')
 else:
-    print('enter valid assim mode')
-    
+    print('No valid assim mode was entered. Select 'cso', 'snotel' or 'both'.)
+ 
