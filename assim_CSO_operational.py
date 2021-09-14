@@ -9,11 +9,10 @@ import numpy as np
 from datetime import datetime, timedelta, date
 import requests
 import json
-import rasterio as rio
-import gdal
-import richdem as rd
-from scipy import ndimage
 from rasterstats import point_query
+from shapely import geometry as sgeom
+import ulmo
+from collections import OrderedDict
 
 
 #########################################################################
@@ -37,7 +36,7 @@ SMpath = '/nfs/attic/dfh/Aragon2/CSOsm/jan2021_snowmodel-dfhill_'+domain+'/'
 
 # TIME
 # choose if want to set 'manual' or 'auto' date 
-date_flag = 'auto'
+date_flag = 'manual'
 # If you choose 'manual' set your dates below  
 # This will start on the 'begin' date at 0:00 and the last iteration will 
 # be at 18:00 on the day of the 'end' date below.
@@ -94,8 +93,8 @@ def swe_calc(gdf):
             (DOY-180))+1)/2 + b[0]*H**b[1]*PPTWT**b[2]*TD**b[3]*DOY**b[4]*\
             (np.tanh(.01*(DOY-180))+1)/2;
     #convert swe to m to input into SM
-    gdf['SWE'] = SWE/1000
-    gdf['DOY'] = DOY
+    gdf['swe'] = SWE/1000
+    gdf['doy'] = DOY
     return gdf
 
 
@@ -137,6 +136,14 @@ def get_cso(st, ed, domain):
 
     #ingdf = extract_meta(gdf,domain,dem_path,lc_path)
     ingdf = swe_calc(gdf)
+    ingdf_proj = ingdf.to_crs(mod_proj)
+    
+    ingdf['dt'] = pd.to_datetime(ingdf['timestamp'], format='%Y-%m-%dT%H:%M:%S').dt.date
+    ingdf['Y'] = pd.DatetimeIndex(ingdf['dt']).year
+    ingdf['M'] = pd.DatetimeIndex(ingdf['dt']).month
+    ingdf['D'] = pd.DatetimeIndex(ingdf['dt']).day
+    ingdf["x"] = ingdf_proj.geometry.x
+    ingdf["y"] = ingdf_proj.geometry.y
     
     return ingdf
 
@@ -298,7 +305,6 @@ def make_SMassim_file(CSOdata,outFpath):
     '''
     print('Generating assim file')
     f= open(outFpath,"w+")
-    CSOdata['Y'] = pd.DatetimeIndex(CSOdata['timestamp']).year
 
     tot_obs=len(CSOdata)
     uq_day = np.unique(CSOdata.dt)
@@ -315,8 +321,8 @@ def make_SMassim_file(CSOdata,outFpath):
         f.write(obs_count+' \n')
         for k in range(len(obs)):
             ids = 100+k
-            x= obs.geometry.x[obs.index[k]]
-            y=obs.geometry.y[obs.index[k]]
+            x= obs.x[obs.index[k]]
+            y=obs.y[obs.index[k]]
             swe=obs.swe[obs.index[k]]
             f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
     f.close() 
@@ -348,8 +354,8 @@ def make_SMassim_file_snotel(STswe,STmeta,outFpath):
         ids = 100
         for k in stn:
             ids = ids + 1 
-            x = STmeta.easting.values[new.code.values == k][0]
-            y = STmeta.northing.values[new.code.values == k][0]
+            x = STmeta.easting.values[STmeta.code.values == k][0]
+            y = STmeta.northing.values[STmeta.code.values == k][0]
             swe = STswe[k][j]
             f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
     f.close() 
@@ -370,10 +376,10 @@ def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
     
     #determine number of days with observations to assimilate
     if STswe.shape[1]>0:
-        uq_day = np.unique(np.concatenate((STswe.index.date,CSOdata.dt.dt.date.values)))
+        uq_day = np.unique(np.concatenate((STswe.index.date,CSOdata.dt.values)))
         f.write('{:02.0f}\n'.format(len(uq_day)))
     else:
-        uq_day = np.unique(CSOdata.dt.dt.date.values)
+        uq_day = np.unique(CSOdata.dt.values)
         f.write('{:02.0f}\n'.format(len(uq_day)))
     
     # determine snotel stations 
@@ -386,7 +392,7 @@ def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
     for i in range(len(uq_day)):
 
         SThoy = STswe[STswe.index.date == uq_day[i]]
-        CSOhoy = CSOdata[CSOdata.dt.dt.date.values == uq_day[i]]
+        CSOhoy = CSOdata[CSOdata.dt.values == uq_day[i]]
 
         d=uq_day[i].day
         m=uq_day[i].month
@@ -444,7 +450,7 @@ def replace_line(file_name, line_num, text):
 #edit par file for correct number of timesteps 
 parFile = SMpath + 'snowmodel.par'
 value = str((datetime.strptime(eddt,'%Y-%m-%d')-datetime.strptime(stdt,'%Y-%m-%d')).days*4+4)
-print('Number of timesteps =',value)
+#print('Number of timesteps =',value)
 replace_line(parFile,11,value +'			!max_iter - number of model time steps\n')
 
 #function to make SM assim file based on selected landscape characteristic
@@ -493,6 +499,7 @@ codepath = SMpath+'/code/'
 incFile = SMpath+'code/snowmodel.inc'
 
 if assim_mod == 'cso':
+    print('Creating assim input file using CSO observations')
     CSOgdf = get_cso(stdt, eddt, domain)
     make_SMassim_file(CSOgdf,outFpath)
     #edit .inc file
@@ -505,6 +512,8 @@ if assim_mod == 'cso':
     get_ipython().system(' ./snowmodel')
         
 elif assim_mod == 'snotel':
+    print('Creating assim input file using SNOTEL observations')
+    snotel_gdf = get_snotel_stns(domain)
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
     make_SMassim_file_snotel(swe,SNOTELgdf,outFpath)
     #edit .inc file
@@ -516,7 +525,9 @@ elif assim_mod == 'snotel':
     get_ipython().run_line_magic('cd', '$SMpath')
     get_ipython().system(' ./snowmodel')
 elif assim_mod == 'both':
+    print('Creating assim input file using CSO & SNOTEL observations')
     CSOgdf = get_cso(stdt, eddt, domain)
+    snotel_gdf = get_snotel_stns(domain)
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
     num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath)
     #edit .inc file
