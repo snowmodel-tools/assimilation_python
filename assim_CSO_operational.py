@@ -44,11 +44,10 @@ date_flag = 'auto'
 st_dt = '2019-02-01'
 ed_dt = '2019-02-05'
 
-# ASSIM VARIABLE
-#can be 'all',elev','slope','tc','delta_day','M', 'lc', 'aspect'
-setvar = 'all'
+# ASSIM OPTIONS
+# can be set to 'cso', 'both' or 'snotel'
+assim_mod = 'both'
 #########################################################################
-
 
 # Date setup function
 def set_dates(st_dt,ed_dt,date_flag):
@@ -72,7 +71,9 @@ def set_dates(st_dt,ed_dt,date_flag):
 
 stdt, eddt = set_dates(st_dt,ed_dt,date_flag)
 
-
+#########################################################################
+# CSO Functions
+#########################################################################
 # Function to get SWE from CSO Hs
 
 def swe_calc(gdf):
@@ -98,7 +99,7 @@ def swe_calc(gdf):
     return gdf
 
 
-# ## Function to build geodataframe of CSO point observations 
+# Function to build geodataframe of CSO point observations 
 
 def get_cso(st, ed, domain):
     ''' 
@@ -139,31 +140,175 @@ def get_cso(st, ed, domain):
     
     return ingdf
 
-CSOgdf = get_cso(stdt, eddt, domain)
+
+##############
+#Insert: QA/QC function for CSO data
+##############
+
+#########################################################################
+# SNOTEL Functions
+#########################################################################
+
+# functions to get SNOTEL stations as geodataframe
+def sites_asgdf(ulmo_getsites, stn_proj):
+    """ Convert ulmo.cuahsi.wof.get_sites response into a point GeoDataframe
+    """
+    
+    # Note: Found one SNOTEL site that was missing the location key
+    sites_df = pd.DataFrame.from_records([
+        OrderedDict(code=s['code'], 
+        longitude=float(s['location']['longitude']), 
+        latitude=float(s['location']['latitude']), 
+        name=s['name'], 
+        elevation_m=s['elevation_m'])
+        for _,s in ulmo_getsites.items()
+        if 'location' in s
+    ])
+
+    sites_gdf = gpd.GeoDataFrame(
+        sites_df, 
+        geometry=gpd.points_from_xy(sites_df['longitude'], sites_df['latitude']),
+        crs=stn_proj
+    )
+    return sites_gdf
+
+def get_snotel_stns(domain):
+    
+    #path to CSO domains
+    domains_resp = requests.get("https://raw.githubusercontent.com/snowmodel-tools/preprocess_python/master/CSO_domains.json")
+    domains = domains_resp.json()
+
+    #Snotel bounding box
+    Bbox = domains[domain]['Bbox']
+
+    # Snotel projection
+    stn_proj = domains[domain]['stn_proj']
+    # model projection
+    mod_proj = domains[domain]['mod_proj']
+
+    # Convert the bounding box dictionary to a shapely Polygon geometry using sgeom.box
+    box_sgeom = sgeom.box(Bbox['lonmin'], Bbox['latmin'], Bbox['lonmax'], Bbox['latmax'])
+    box_gdf = gpd.GeoDataFrame(geometry=[box_sgeom], crs=stn_proj)
+    
+    # WaterML/WOF WSDL endpoint url 
+    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+
+    # get dictionary of snotel sites 
+    sites = ulmo.cuahsi.wof.get_sites(wsdlurl,user_cache=True)
+
+    #turn sites to geodataframe 
+    snotel_gdf = sites_asgdf(sites,stn_proj)
+    
+    #clip snotel sites to domain bounding box
+    gdf = gpd.sjoin(snotel_gdf, box_gdf, how="inner")
+    gdf.drop(columns='index_right', inplace=True)
+    gdf.reset_index(drop=True, inplace=True)
+
+    #add columns with projected coordinates 
+    CSO_proj = gdf.to_crs(mod_proj)
+    gdf['easting'] = CSO_proj.geometry.x
+    gdf['northing'] = CSO_proj.geometry.y
+    
+    return gdf
 
 
-# # Function to format & export for SM 
+def fetch(sitecode, variablecode, start_date, end_date):
+    print(sitecode, variablecode, start_date, end_date)
+    values_df = None
+    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+    try:
+        #Request data from the server
+        site_values = ulmo.cuahsi.wof.get_values(
+            wsdlurl, 'SNOTEL:'+sitecode, variablecode, start=start_date, end=end_date
+        )
+        #Convert to a Pandas DataFrame   
+        values_df = pd.DataFrame.from_dict(site_values['values'])
+        #Parse the datetime values to Pandas Timestamp objects
+        values_df['datetime'] = pd.to_datetime(values_df['datetime'])
+        #Set the DataFrame index to the Timestamps
+        values_df.set_index('datetime', inplace=True)
+        #Convert values to float and replace -9999 nodata values with NaN
+        values_df['value'] = pd.to_numeric(values_df['value']).replace(-9999, np.nan)
+        #Remove any records flagged with lower quality
+        values_df = values_df[values_df['quality_control_level_code'] == '1']
+    except:
+        print("Unable to fetch %s" % variablecode)
+    
+    return values_df
 
 
-def make_SMassim_file(new,outFpath):
+# returns daily timeseries of snotel variables 
+# https://www.wcc.nrcs.usda.gov/web_service/AWDB_Web_Service_Reference.htm#commonlyUsedElementCodes
+# 'WTEQ': swe [in]
+# 'SNWD': snow depth [in]
+# 'PRCP': precipitation increment [in]
+# 'PREC': precipitation accumulation [in]
+# 'TAVG': average air temp [F]
+# 'TMIN': minimum air temp [F]
+# 'TMAX': maximum air temp [F]
+# 'TOBS': observered air temp [F]
+def get_snotel_data(gdf,sd_dt, ed_dt,var,units='metric'):
     '''
-    new = dataframe with subset of CSO data 
+    gdf - pandas geodataframe of SNOTEL sites
+    st_dt - start date string 'yyyy-mm-dd'
+    ed_dt - end date string 'yyyy-mm-dd'
+    var - snotel variable of interest 
+    units - 'metric' (default) or 'imperial'
+    '''
+    stn_data = pd.DataFrame(index=pd.date_range(start=st_dt, end=ed_dt))
+    
+
+    for sitecode in gdf.code:
+        try:
+            data = fetch(sitecode,'SNOTEL:'+var+'_D', start_date=st_dt, end_date=ed_dt)
+            #check for nan values
+            if len(data.value[np.isnan(data.value)]) > 0:
+                #check if more than 10% of data is missing
+                if len(data.value[np.isnan(data.value)])/len(data) > .1:
+                    print('More than 10% of days missing')
+                    gdf.drop(gdf.loc[gdf['code']==sitecode].index, inplace=True)
+                    continue
+            stn_data[sitecode] = data.value
+        except:
+            gdf.drop(gdf.loc[gdf['code']==sitecode].index, inplace=True)     
+    
+    gdf.reset_index(drop=True, inplace=True)
+    if units == 'metric':
+        if (var == 'WTEQ') |(var == 'SNWD') |(var == 'PRCP') |(var == 'PREC'):
+            #convert SNOTEL units[in] to [m]
+            for sitecode in gdf.code:
+                stn_data[sitecode] = 0.0254 * stn_data[sitecode]
+        elif (var == 'TAVG') |(var == 'TMIN') |(var == 'TMAX') |(var == 'TOBS'):
+            #convert SNOTEL units[F] to [C]
+            for sitecode in gdf.code:
+                stn_data[sitecode] = (stn_data[sitecode] - 32) * 5/9
+    return gdf, stn_data
+
+
+
+#########################################################################
+# Functions to format CSO & SNOTEL data for SM 
+#########################################################################
+
+def make_SMassim_file(CSOdata,outFpath):
+    '''
+    CSOdata = dataframe with CSO data 
     
     outFpath = output path to formated assim data for SM 
     '''
     print('Generating assim file')
     f= open(outFpath,"w+")
-    new['Y'] = pd.DatetimeIndex(new['timestamp']).year
+    CSOdata['Y'] = pd.DatetimeIndex(CSOdata['timestamp']).year
 
-    tot_obs=len(new)
-    uq_day = np.unique(new.dt)
+    tot_obs=len(CSOdata)
+    uq_day = np.unique(CSOdata.dt)
     num_days = len(uq_day)
     f.write('{:02.0f}\n'.format(num_days))
     for j in range(len(uq_day)):
-        obs = new[new['dt']==uq_day[j]]
-        d=new.D[new['dt']==uq_day[j]].values
-        m=new.M[new['dt']==uq_day[j]].values
-        y=new.Y[new['dt']==uq_day[j]].values
+        obs = CSOdata[CSOdata['dt']==uq_day[j]]
+        d=CSOdata.D[CSOdata['dt']==uq_day[j]].values
+        m=CSOdata.M[CSOdata['dt']==uq_day[j]].values
+        y=CSOdata.Y[CSOdata['dt']==uq_day[j]].values
         date = str(y[0])+' '+str(m[0])+' '+str(d[0])
         obs_count = str(len(obs))
         f.write(date+' \n')
@@ -175,8 +320,112 @@ def make_SMassim_file(new,outFpath):
             swe=obs.swe[obs.index[k]]
             f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
     f.close() 
+    
+
+def make_SMassim_file_snotel(STswe,STmeta,outFpath):
+    '''
+    STmeta = dataframe with SNOTEL sites
+    
+    STswe = dataframe with SWE data 
+    
+    outFpath = output path to formated assim data for SM 
+    '''
+    print('Generating assim file')
+    f= open(outFpath,"w+")
+
+    tot_obs=np.shape(STswe)[0]*np.shape(STswe)[1]
+    uq_day = np.shape(STswe)[0]
+    stn = list(STswe.columns)
+    f.write('{:02.0f}\n'.format(uq_day))
+    for j in range(uq_day):
+        d=STswe.index[j].day
+        m=STswe.index[j].month
+        y=STswe.index[j].year
+        date = str(y)+' '+str(m)+' '+str(d)
+        stn_count = np.shape(STswe)[1]
+        f.write(date+' \n')
+        f.write(str(stn_count)+' \n')
+        ids = 100
+        for k in stn:
+            ids = ids + 1 
+            x = STmeta.easting.values[new.code.values == k][0]
+            y = STmeta.northing.values[new.code.values == k][0]
+            swe = STswe[k][j]
+            f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
+    f.close() 
 
 
+def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
+    '''
+    STmeta = dataframe with SNOTEL sites
+    
+    STswe = dataframe with SWE data 
+    
+    CSOdata = dataframe with CSO data
+    
+    outFpath = output path to formated assim data for SM 
+    '''
+    print('Generating assim file')
+    f= open(outFpath,"w+")
+    
+    #determine number of days with observations to assimilate
+    if STswe.shape[1]>0:
+        uq_day = np.unique(np.concatenate((STswe.index.date,CSOdata.dt.dt.date.values)))
+        f.write('{:02.0f}\n'.format(len(uq_day)))
+    else:
+        uq_day = np.unique(CSOdata.dt.dt.date.values)
+        f.write('{:02.0f}\n'.format(len(uq_day)))
+    
+    # determine snotel stations 
+    stn = list(STswe.columns)
+    
+    # ids for CSO observations - outside of loop so each observation is unique
+    IDS = 500
+    
+    #add assimilation observations to output file
+    for i in range(len(uq_day)):
+
+        SThoy = STswe[STswe.index.date == uq_day[i]]
+        CSOhoy = CSOdata[CSOdata.dt.dt.date.values == uq_day[i]]
+
+        d=uq_day[i].day
+        m=uq_day[i].month
+        y=uq_day[i].year
+
+        date = str(y)+' '+str(m)+' '+str(d)
+
+        stn_count = len(stn) + len(CSOhoy)
+        
+        if stn_count > 0:
+            f.write(date+' \n')
+            f.write(str(stn_count)+' \n')
+
+        #go through snotel stations for that day 
+        ids = 100
+        if len(SThoy) > 0:
+            for k in stn:
+                ids = ids + 1 
+                x = STmeta.easting.values[STmeta.code.values == k][0]
+                y = STmeta.northing.values[STmeta.code.values == k][0]
+                swe = SThoy[k].values[0]
+                f.write('{:3.0f}\t'.format(ids)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))    
+        #go through cso obs for that day 
+        if len(CSOhoy) > 0:
+            for c in range(len(CSOhoy)):
+                IDS = IDS + 1 
+                x= CSOhoy.x[CSOhoy.index[c]]
+                y=CSOhoy.y[CSOhoy.index[c]]
+                swe=CSOhoy.swe[CSOhoy.index[c]]
+                f.write('{:3.0f}\t'.format(IDS)+'{:10.0f}\t'.format(x)+'{:10.0f}\t'.format(y)+'{:3.2f}\n'.format(swe))
+    f.close()
+    return len(uq_day)
+
+    
+    
+    
+#########################################################################
+# Functions to edit SM files 
+#########################################################################
 # function to edit SnowModel Files other than .par
 # for assim - have to adjust .inc file to specify # of obs being assimilated
 def replace_line(file_name, line_num, text):
@@ -201,40 +450,83 @@ replace_line(parFile,11,value +'			!max_iter - number of model time steps\n')
 #function to make SM assim file based on selected landscape characteristic
 #var can be 'all',elev','slope','tc','delta_day','M', 'lc', 'aspect'
 
-def SMassim_ensemble(gdf,var,SMpath):
-    '''
-    gdf: this is the geodataframe containing all CSO obs taken over the time period of interest
-    var: this is the landscape characteristic that will be made into an assimilation ensemble 
-        'all': assimilate all inputs to SM
-        'elev': assimilate each of n elevation bands. 
-            Default = breaks elevation range into 5 bands
-        'slope': assimilate each of n slope bands. 
-            Default = breaks slope range into 5 bands
-        'tc': assimilate each of n terrain complexity score bands. 
-            Default = breaks tc score range into 5 bands
-        'delta_day': sets a minimum number of days between assimilated observations. 
-            -> only 1 observation is selected each day
-        'M': assimilate data from each month
-        'lc': assimilate data from each land cover class
-        'aspect': assimilate data from each aspect N, E, S, W
-    '''
-    #create directory with initiation date for ensemble if it doesn't exist
-    outFpath = SMpath+'swe_assim/swe_obs_test.dat'
-    codepath = SMpath+'/code/'
-    incFile = SMpath+'code/snowmodel.inc'
-    if var == 'all':
-        new = gdf
-        make_SMassim_file(new,outFpath)
-        #edit .inc file
-        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(new)+1)+')\n')
-        #compile SM
-        get_ipython().run_line_magic('cd', '$codepath')
-        get_ipython().system(' ./compile_snowmodel.script')
-        #run snowmodel 
-        get_ipython().run_line_magic('cd', '$SMpath')
-        get_ipython().system(' ./snowmodel')
+# def SMassim_ensemble(gdf,var,SMpath):
+#     '''
+#     gdf: this is the geodataframe containing all CSO obs taken over the time period of interest
+#     var: this is the landscape characteristic that will be made into an assimilation ensemble 
+#         'all': assimilate all inputs to SM
+#         'elev': assimilate each of n elevation bands. 
+#             Default = breaks elevation range into 5 bands
+#         'slope': assimilate each of n slope bands. 
+#             Default = breaks slope range into 5 bands
+#         'tc': assimilate each of n terrain complexity score bands. 
+#             Default = breaks tc score range into 5 bands
+#         'delta_day': sets a minimum number of days between assimilated observations. 
+#             -> only 1 observation is selected each day
+#         'M': assimilate data from each month
+#         'lc': assimilate data from each land cover class
+#         'aspect': assimilate data from each aspect N, E, S, W
+#     '''
+#     #create directory with initiation date for ensemble if it doesn't exist
+#     outFpath = SMpath+'swe_assim/swe_obs_test.dat'
+#     codepath = SMpath+'/code/'
+#     incFile = SMpath+'code/snowmodel.inc'
+#     if var == 'all':
+#         new = gdf
+#         make_SMassim_file(new,outFpath)
+#         #edit .inc file
+#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(new)+1)+')\n')
+#         #compile SM
+#         get_ipython().run_line_magic('cd', '$codepath')
+#         get_ipython().system(' ./compile_snowmodel.script')
+#         #run snowmodel 
+#         get_ipython().run_line_magic('cd', '$SMpath')
+#         get_ipython().system(' ./snowmodel')
+
+#     SMassim_ensemble(CSOgdf,setvar,SMpath)
 
 
 # Run SM with CSO assim
 
-SMassim_ensemble(CSOgdf,setvar,SMpath)
+outFpath = SMpath+'swe_assim/swe_obs_test.dat'
+codepath = SMpath+'/code/'
+incFile = SMpath+'code/snowmodel.inc'
+
+if assim_mod == 'cso':
+    CSOgdf = get_cso(stdt, eddt, domain)
+    make_SMassim_file(CSOgdf,outFpath)
+    #edit .inc file
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf)+1)+')\n')
+    #compile SM
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel 
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
+        
+elif assim_mod == 'snotel':
+    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+    make_SMassim_file_snotel(swe,SNOTELgdf,outFpath)
+    #edit .inc file
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(swe)+1)+')\n')
+    #compile SM        
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel 
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
+elif assim_mod == 'both':
+    CSOgdf = get_cso(stdt, eddt, domain)
+    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+    num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath)
+    #edit .inc file
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+    #compile SM
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
+else:
+    print('enter valid assim mode')
+    
