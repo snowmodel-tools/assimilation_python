@@ -449,8 +449,10 @@ def replace_line(file_name, line_num, text):
 
 #edit par file for correct number of timesteps 
 parFile = SMpath + 'snowmodel.par'
+replace_line(parFile,7,str(datetime.strptime(stdt,'%Y-%m-%d').year) +'                          !iyear_init - start year\n')
+replace_line(parFile,8,str(datetime.strptime(stdt,'%Y-%m-%d').month) +'                        !imonth_init - start month\n')
+replace_line(parFile,9,str(datetime.strptime(stdt,'%Y-%m-%d').day) +'                            !iday_init - start day\n')
 value = str((datetime.strptime(eddt,'%Y-%m-%d')-datetime.strptime(stdt,'%Y-%m-%d')).days*4+4)
-#print('Number of timesteps =',value)
 replace_line(parFile,11,value +'			!max_iter - number of model time steps\n')
 
 
