@@ -150,9 +150,30 @@ def get_cso(st, ed, domain):
     return ingdf
 
 
-##############
-#Insert: QA/QC function for CSO data
-##############
+# QA/QC function for CSO data
+def qaqc_iqr(csodf):
+    print('Performing qa/qc using IQR method')
+    iqr_flag = []
+    for i in range(len(csodf)):
+        # get cso snow depth
+        csohs = csodf.H[i]
+        # get date
+        dates = pd.to_datetime(csodf.timestamp[i], format='%Y-%m-%dT%H:%M:%S')
+
+        # define path names for 1st and 3rd doy quantiles
+        q1_Fname = clim_dir+dates.strftime("%m")+dates.strftime("%d")+'1036q1.tif'
+        q3_Fname = clim_dir+dates.strftime("%m")+dates.strftime("%d")+'1036q3.tif'
+
+        q1 = point_query([csodf.geometry[i]], q1_Fname)[0]
+        q3 = point_query([csodf.geometry[i]], q3_Fname)[0]
+        IQR = q3-q1
+        # False = outlier
+        iqr_flag.append((csohs > (q1-1.5*IQR)) & (csohs < (q3+1.5*IQR)))
+
+    csodf['iqr_flag'] = iqr_flag
+    csodf_clean = csodf.loc[csodf['iqr_flag'] == True]
+    csodf_clean = csodf_clean.reset_index(drop=True)
+    return csodf_clean
 
 #########################################################################
 # SNOTEL Functions
@@ -471,10 +492,11 @@ if assim_mod == 'cso':
         replace_line(parFile,35,'0			!irun_data_assim - 0 for straight run; 1 for assim run\n')      
     else:    
         print('Creating assim input file using CSO observations')
-        replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')  
-        make_SMassim_file(CSOgdf,outFpath)
+        replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')
+        CSOgdf_clean = qaqc_iqr(CSOgdf)
+        make_SMassim_file(CSOgdf_clean,outFpath)
     #edit .inc file
-    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf)+1)+')\n')
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
     #compile SM
     get_ipython().run_line_magic('cd', '$codepath')
     get_ipython().system(' ./compile_snowmodel.script')
@@ -502,8 +524,9 @@ elif assim_mod == 'snotel':
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
     CSOgdf = get_cso(stdt, eddt, domain)
-    CSOdata = CSOgdf.sort_values(by='dt',ascending=True)
-    CSOdata = CSOdata.reset_index(drop=True)
+    CSOgdf_clean = qaqc_iqr(CSOgdf)  
+    CSOdata = CSOgdf_clean.sort_values(by='dt',ascending=True)
+    CSOdata = CSOdata_clean.reset_index(drop=True)
     # set delta time 
     delta = 5
     # index list
