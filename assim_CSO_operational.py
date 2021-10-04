@@ -44,8 +44,10 @@ st_dt = '2019-08-01'
 ed_dt = '2019-08-05'
 
 # ASSIM OPTIONS
+# select the data source to be assimilated
 # can be set to 'cso', 'both' or 'snotel'
 assim_mod = 'cso'
+
 #########################################################################
 
 # Date setup function
