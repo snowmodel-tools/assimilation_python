@@ -35,8 +35,6 @@ OUTpath = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/mm_WY_2018-2019.dat'
 # choose if want to set 'manual' or 'auto' date 
 date_flag = 'manual'
 # If you choose 'manual' set your dates below  
-# This will start on the 'begin' date at 0:00 and the last iteration will 
-# be on the day before the 'end' date below.
 st_dt = '2018-09-01'
 ed_dt = '2019-10-01'
 #########################################################################
