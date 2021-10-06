@@ -21,24 +21,22 @@ ee.Initialize()
 #########################################################################
 ############################ USER INPUTS ################################
 #########################################################################
+# DOMAIN
+# choose the modeling domain
+domain = 'CA'
+
 # PATHS
 # path to temporary folder to store tif files from gee
 TIFpath = 'GEE_Downloads/'
 # path to where you want your output met .dat fime
-OUTpath = 'tst.dat'
-
-# DOMAIN
-# choose the modeling domain
-domain = 'WY'
+OUTpath = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/mm_WY_2018-2019.dat'
 
 # TIME
 # choose if want to set 'manual' or 'auto' date 
 date_flag = 'manual'
 # If you choose 'manual' set your dates below  
-# This will start on the 'begin' date at 0:00 and the last iteration will 
-# be on the day before the 'end' date below.
-st_dt = '2020-04-03'
-ed_dt = '2020-04-04'
+st_dt = '2018-09-01'
+ed_dt = '2019-10-01'
 #########################################################################
 
 
@@ -46,20 +44,24 @@ ed_dt = '2020-04-04'
 def set_dates(st_dt,ed_dt,date_flag):
     if date_flag == 'auto':
         # ###automatically select date based on today's date 
-        hoy = date.today()
+        hoy = datetime.strptime('2020-07-04', "%Y-%m-%d")
         antes = timedelta(days = 2)
         #end date 3 days before today's date
         fecha = hoy - antes
         eddt = fecha.strftime("%Y-%m-%d") 
-        #start date
-        if fecha.month <10:
-            styr = fecha.year - 1
+        #whole water year
+        if (hoy.month == 10) & (hoy.day == 3):
+            eddt = fecha.strftime("%Y-%m-%d") 
+            stdt = str(hoy.year - 1)+'-10-01'
+        #start dates
+        elif fecha.month <10:
+            stdt = str(fecha.year - 1)+'-10-01'
         else:
-            styr = fecha.year
-        stdt = str(styr)+'-10-01'
+            stdt = str(fecha.year)+'-10-01'
     elif date_flag == 'manual':
         stdt = st_dt
-        eddt = ed_dt
+        # add one day to end date because GEE ends on date before last date
+        eddt = (datetime.strptime(ed_dt, "%Y-%m-%d")+timedelta(days = 1)).strftime("%Y-%m-%d") 
     return stdt, eddt
 
 
@@ -101,7 +103,7 @@ def get_cfsv2(domain, TIFpath, stdt, eddt):
     maxLongMET = (maxLong + 0.5);
 
     # This resolution for the NLCD and DEM outputs for the SnowModel domain in meters
-    sm_resolution = 100
+    sm_resolution = int(domains[domain]['cellsize'])
 
     '''// Resolution for the PRISM output. This shoud change by Latitude of the domain
     // because the PRISM product spatial resolution is 2.5 minutes, which equals 150 arc seconds.
@@ -113,11 +115,6 @@ def get_cfsv2(domain, TIFpath, stdt, eddt):
 
     '''// Define the final output projection using EPSG codes'''
     epsg_code = domains[domain]['mod_proj']
-
-    #// Name the DEM output
-    dem_name = 'DEM'
-    #// Name the Land Cover output
-    lc_name = 'NLCD2016'
 
     my_domain = ee.Geometry.Rectangle(**{'coords':[minLong,minLat,maxLong,maxLat],'proj': 'EPSG:4326','geodesic':True,});
     my_domain_met = ee.Geometry.Rectangle([minLongMET,minLatMET,maxLongMET,maxLatMET])
