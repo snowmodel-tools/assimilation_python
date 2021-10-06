@@ -501,11 +501,11 @@ if assim_mod == 'cso':
     #edit .inc file
     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
     #compile SM
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel 
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel 
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
         
 elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
@@ -518,11 +518,11 @@ elif assim_mod == 'snotel':
     #edit .inc file
     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(sample)+1)+')\n')
     #compile SM        
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel 
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel 
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
 
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
@@ -564,11 +564,11 @@ elif assim_mod == 'both':
         #edit .inc file
         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(newSTswe+1)+')\n')
     #compile SM
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
 else:
     print("No valid assim mode was entered. Select 'cso', 'snotel' or 'both'.")
  
