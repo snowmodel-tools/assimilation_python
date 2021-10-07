@@ -32,11 +32,11 @@ dem_path = dataPath + 'DEM_'+domain+'.tif'
 #path to landcover .tif
 lc_path = dataPath + 'NLCD2016_'+domain+'.tif'
 #path to SnowModel
-SMpath = '/nfs/attic/dfh/Aragon2/CSOsm/jan2021_snowmodel-dfhill_'+domain+'/'
+SMpath = '/nfs/attic/dfh/Aragon2/CSOsm/'+domain+'/all/'
 
 # TIME
 # choose if want to set 'manual' or 'auto' date 
-date_flag = 'manual'
+date_flag = 'auto'
 # If you choose 'manual' set your dates below  
 st_dt = '2019-01-01'
 ed_dt = '2019-01-05'
@@ -52,14 +52,14 @@ print(assim_mod)
 def set_dates(st_dt,ed_dt,date_flag):
     if date_flag == 'auto':
         # ###automatically select date based on today's date 
-        hoy = datetime.strptime('2020-07-04', "%Y-%m-%d")
-        antes = timedelta(days = 2)
+        hoy = date.today()
+        antes = timedelta(days = 3)
         #end date 3 days before today's date
         fecha = hoy - antes
-        eddt = fecha.strftime("%Y-%m-%d") 
+        eddt = fecha.strftime("%Y-%m-%d")  
         #whole water year
         if (hoy.month == 10) & (hoy.day == 3):
-            eddt = fecha.strftime("%Y-%m-%d") 
+            eddt = fecha.strftime("%Y-%m-%d")
             stdt = str(hoy.year - 1)+'-10-01'
         #start dates
         elif fecha.month <10:
@@ -68,11 +68,11 @@ def set_dates(st_dt,ed_dt,date_flag):
             stdt = str(fecha.year)+'-10-01'
     elif date_flag == 'manual':
         stdt = st_dt
-        eddt = ed_dt
+        eddt = ed_dt 
     return stdt, eddt
 
 stdt, eddt = set_dates(st_dt,ed_dt,date_flag)
-
+print(stdt, eddt)
 #########################################################################
 # CSO Functions
 #########################################################################
@@ -154,7 +154,7 @@ def get_cso(st, ed, domain):
 
 # QA/QC function for CSO data
 def qaqc_iqr(csodf):
-    print('Performing qa/qc using IQR method')
+    print('Performing qa/qc on CSO data using IQR method')
     clim_dir = '/nfs/attic/dfh/data/snodas/snodas_tif/clim/'
     iqr_flag = []
     for i in range(len(csodf)):
@@ -280,7 +280,7 @@ def fetch(sitecode, variablecode, start_date, end_date):
 # 'TMIN': minimum air temp [F]
 # 'TMAX': maximum air temp [F]
 # 'TOBS': observered air temp [F]
-def get_snotel_data(gdf,sd_dt, ed_dt,var,units='metric'):
+def get_snotel_data(gdf,sddt, eddt,var,units='metric'):
     '''
     gdf - pandas geodataframe of SNOTEL sites
     st_dt - start date string 'yyyy-mm-dd'
@@ -288,17 +288,17 @@ def get_snotel_data(gdf,sd_dt, ed_dt,var,units='metric'):
     var - snotel variable of interest 
     units - 'metric' (default) or 'imperial'
     '''
-    stn_data = pd.DataFrame(index=pd.date_range(start=st_dt, end=ed_dt))
+    stn_data = pd.DataFrame(index=pd.date_range(start=stdt, end=eddt))
     
 
     for sitecode in gdf.code:
         try:
-            data = fetch(sitecode,'SNOTEL:'+var+'_D', start_date=st_dt, end_date=ed_dt)
+            data = fetch(sitecode,'SNOTEL:'+var+'_D', start_date=stdt, end_date=eddt)
             #check for nan values
             if len(data.value[np.isnan(data.value)]) > 0:
                 #check if more than 10% of data is missing
-                if len(data.value[np.isnan(data.value)])/len(data) > .1:
-                    print('More than 10% of days missing')
+                if len(data.value[np.isnan(data.value)])/len(data) > .02:
+                    print('More than 2% of days missing')
                     gdf.drop(gdf.loc[gdf['code']==sitecode].index, inplace=True)
                     continue
             stn_data[sitecode] = data.value
@@ -398,6 +398,8 @@ def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
     outFpath = output path to formated assim data for SM 
     '''
     print('Generating assim file')
+    get_ipython().run_line_magic('rm', '-rf','$outFpath','||:')
+
     f= open(outFpath,"w+")
     
     #determine number of days with observations to assimilate
@@ -526,13 +528,14 @@ elif assim_mod == 'snotel':
 
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
+    replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')
     CSOgdf = get_cso(stdt, eddt, domain)
-    CSOgdf_clean = qaqc_iqr(CSOgdf)  
-    CSOdata = CSOgdf_clean.sort_values(by='dt',ascending=True)
-    CSOdata = CSOdata.reset_index(drop=True)
     # set delta time 
     delta = 5
-    if len(CSOdata)>=1:
+    if len(CSOgdf)>=1:
+        CSOgdf_clean = qaqc_iqr(CSOgdf)  
+        CSOdata = CSOgdf_clean.sort_values(by='dt',ascending=True)
+        CSOdata = CSOdata.reset_index(drop=True)
         # index list
         idx = [0]
         st = CSOdata.dt[0]
@@ -562,7 +565,7 @@ elif assim_mod == 'both':
         newSTswe = STswe.iloc[::delta,:]
         make_SMassim_file_snotel(newSTswe,newST,outFpath)
         #edit .inc file
-        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(newSTswe+1)+')\n')
+        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
     #compile SM
     get_ipython().run_line_magic('cd', '$codepath')
     get_ipython().system(' ./compile_snowmodel.script')
