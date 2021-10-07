@@ -82,9 +82,9 @@ def swe_calc(gdf):
     #convert snow depth to mm to input into density function
     H = gdf.depth.values*10
     #Get temp info at each point
-    TD = np.array([point_query([val], 'td_final.txt')[0] for val in gdf.geometry])
+    TD = np.array([point_query([val], '/nfs/attic/dfh/data/depth2swe/td_final.txt')[0] for val in gdf.geometry])
     #Get pr info at each point
-    PPTWT = np.array([point_query([val], 'ppt_wt_final.txt')[0] for val in gdf.geometry])
+    PPTWT = np.array([point_query([val], '/nfs/attic/dfh/data/depth2swe/ppt_wt_final.txt')[0] for val in gdf.geometry])
     #Determine day of year
     dates = pd.to_datetime(gdf.timestamp, format='%Y-%m-%dT%H:%M:%S').dt.date.values
     DOY = [date.toordinal(date(dts.year,dts.month,dts.day))-date.toordinal(date(dts.year,9,30)) for dts in dates]
