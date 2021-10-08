@@ -398,7 +398,6 @@ def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
     outFpath = output path to formated assim data for SM 
     '''
     print('Generating assim file')
-    get_ipython().run_line_magic('rm', '-rf','$outFpath','||:')
 
     f= open(outFpath,"w+")
     
