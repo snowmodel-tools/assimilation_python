@@ -44,7 +44,7 @@ ed_dt = '2019-10-01'
 def set_dates(st_dt,ed_dt,date_flag):
     if date_flag == 'auto':
         # ###automatically select date based on today's date 
-        hoy = datetime.strptime('2020-07-04', "%Y-%m-%d")
+        hoy = date.today()
         antes = timedelta(days = 2)
         #end date 3 days before today's date
         fecha = hoy - antes
@@ -63,6 +63,7 @@ def set_dates(st_dt,ed_dt,date_flag):
         # add one day to end date because GEE ends on date before last date
         eddt = (datetime.strptime(ed_dt, "%Y-%m-%d")+timedelta(days = 1)).strftime("%Y-%m-%d") 
     return stdt, eddt
+stdt, eddt = set_dates(st_dt,ed_dt,date_flag)
 
 
 # Download CFSv2 met data function
