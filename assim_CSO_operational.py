@@ -23,7 +23,7 @@ from collections import OrderedDict
 
 # DOMAIN
 # choose the modeling domain
-domain = 'WY'
+domain = 'NH'
 
 # PATHS
 dataPath = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/'
@@ -36,7 +36,7 @@ SMpath = '/nfs/attic/dfh/Aragon2/CSOsm/'+domain+'/all/'
 
 # TIME
 # choose if want to set 'manual' or 'auto' date 
-date_flag = 'auto'
+date_flag = 'manual'
 # If you choose 'manual' set your dates below  
 st_dt = '2019-01-01'
 ed_dt = '2019-01-05'
@@ -224,7 +224,10 @@ def get_snotel_stns(domain):
     box_gdf = gpd.GeoDataFrame(geometry=[box_sgeom], crs=stn_proj)
     
     # WaterML/WOF WSDL endpoint url 
-    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+    if domain == 'NH':
+        wsdlurl = "https://hydroportal.cuahsi.org/Scan/cuahsi_1_1.asmx?WSDL"
+    else:
+        wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
 
     # get dictionary of snotel sites 
     sites = ulmo.cuahsi.wof.get_sites(wsdlurl,user_cache=True)
@@ -245,14 +248,21 @@ def get_snotel_stns(domain):
     return gdf
 
 
-def fetch(sitecode, variablecode, start_date, end_date):
-    print(sitecode, variablecode, start_date, end_date)
+def fetch(sitecode, variablecode, domain,start_date, end_date):
+    print(sitecode, variablecode, domain,start_date, end_date)
     values_df = None
-    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+    # WaterML/WOF WSDL endpoint url 
+    if domain == 'NH':
+        wsdlurl = "https://hydroportal.cuahsi.org/Scan/cuahsi_1_1.asmx?WSDL"
+        network = 'SCAN:'
+    else:
+        wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+        network = 'SNOTEL:'
+
     try:
         #Request data from the server
         site_values = ulmo.cuahsi.wof.get_values(
-            wsdlurl, 'SNOTEL:'+sitecode, variablecode, start=start_date, end=end_date
+            wsdlurl, network+sitecode, variablecode, start=start_date, end=end_date
         )
         #Convert to a Pandas DataFrame   
         values_df = pd.DataFrame.from_dict(site_values['values'])
@@ -280,7 +290,7 @@ def fetch(sitecode, variablecode, start_date, end_date):
 # 'TMIN': minimum air temp [F]
 # 'TMAX': maximum air temp [F]
 # 'TOBS': observered air temp [F]
-def get_snotel_data(gdf,sddt, eddt,var,units='metric'):
+def get_snotel_data(gdf,sddt, eddt,var,domain,units='metric'):
     '''
     gdf - pandas geodataframe of SNOTEL sites
     st_dt - start date string 'yyyy-mm-dd'
@@ -289,11 +299,14 @@ def get_snotel_data(gdf,sddt, eddt,var,units='metric'):
     units - 'metric' (default) or 'imperial'
     '''
     stn_data = pd.DataFrame(index=pd.date_range(start=stdt, end=eddt))
-    
+    if domain == 'NH':
+        network = 'SCAN:'
+    else:
+        network = 'SNOTEL:'    
 
     for sitecode in gdf.code:
         try:
-            data = fetch(sitecode,'SNOTEL:'+var+'_D', start_date=stdt, end_date=eddt)
+            data = fetch(sitecode,network+var+'_D', domain, start_date=stdt, end_date=eddt)
             #check for nan values
             if len(data.value[np.isnan(data.value)]) > 0:
                 #check if more than 10% of data is missing
@@ -498,32 +511,31 @@ if assim_mod == 'cso':
         print('Creating assim input file using CSO observations')
         replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')
         CSOgdf_clean = qaqc_iqr(CSOgdf)
-        make_SMassim_file(CSOgdf_clean,outFpath)
-    #edit .inc file
-    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
-    #compile SM
-    get_ipython().run_line_magic('cd', '$codepath')
-    get_ipython().system(' ./compile_snowmodel.script')
-    #run snowmodel 
-    get_ipython().run_line_magic('cd', '$SMpath')
-    get_ipython().system(' ./snowmodel')
-        
+#         make_SMassim_file(CSOgdf_clean,outFpath)
+#     #edit .inc file
+#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
+#     #compile SM
+#     get_ipython().run_line_magic('cd', '$codepath')
+#     get_ipython().system(' ./compile_snowmodel.script')
+#     #run snowmodel 
+#     get_ipython().run_line_magic('cd', '$SMpath')
+#     get_ipython().system(' ./snowmodel')
+
 elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
     snotel_gdf = get_snotel_stns(domain)
-    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+    SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
     delta = 5
     sample = swe.iloc[::delta,:]
-    make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
-    #make_SMassim_file_snotel(swe,SNOTELgdf,outFpath) #assim all days
-    #edit .inc file
-    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(sample)+1)+')\n')
-    #compile SM        
-    get_ipython().run_line_magic('cd', '$codepath')
-    get_ipython().system(' ./compile_snowmodel.script')
-    #run snowmodel 
-    get_ipython().run_line_magic('cd', '$SMpath')
-    get_ipython().system(' ./snowmodel')
+#     make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
+#     #edit .inc file
+#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(sample)+1)+')\n')
+#     #compile SM        
+#     get_ipython().run_line_magic('cd', '$codepath')
+#     get_ipython().system(' ./compile_snowmodel.script')
+#     #run snowmodel 
+#     get_ipython().run_line_magic('cd', '$SMpath')
+#     get_ipython().system(' ./snowmodel')
 
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
@@ -549,28 +561,27 @@ elif assim_mod == 'both':
         newCSO = CSOdata[CSOdata.index.isin(idx)]
 
         snotel_gdf = get_snotel_stns(domain)
-        SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+        SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
         newSTswe = STswe[STswe.index.isin(newCSO.dt)]
-        num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
-        #num_obs = make_SMassim_file_both(swe,SNOTELgdf,CSOgdf,outFpath) #if want to use all observations
-        #edit .inc file
-        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+#         num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+#         #edit .inc file
+#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
     else:
         print('No CSO observations. Creating assim input file using SNOTEL observations')
         snotel_gdf = get_snotel_stns(domain)
-        SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ')
+        SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
         newSTswe = STswe.iloc[::delta,:]
-        make_SMassim_file_snotel(newSTswe,newST,outFpath)
-        #edit .inc file
-        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
-    #compile SM
-    get_ipython().run_line_magic('cd', '$codepath')
-    get_ipython().system(' ./compile_snowmodel.script')
-    #run snowmodel
-    get_ipython().run_line_magic('cd', '$SMpath')
-    get_ipython().system(' ./snowmodel')
+#         make_SMassim_file_snotel(newSTswe,newST,outFpath)
+#         #edit .inc file
+#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
+#     #compile SM
+#     get_ipython().run_line_magic('cd', '$codepath')
+#     get_ipython().system(' ./compile_snowmodel.script')
+#     #run snowmodel
+#     get_ipython().run_line_magic('cd', '$SMpath')
+#     get_ipython().system(' ./snowmodel')
 else:
     print("No valid assim mode was entered. Select 'cso', 'snotel' or 'both'.")
  
