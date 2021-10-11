@@ -511,15 +511,15 @@ if assim_mod == 'cso':
         print('Creating assim input file using CSO observations')
         replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')
         CSOgdf_clean = qaqc_iqr(CSOgdf)
-#         make_SMassim_file(CSOgdf_clean,outFpath)
+        make_SMassim_file(CSOgdf_clean,outFpath)
 #     #edit .inc file
-#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
-#     #compile SM
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel 
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(CSOgdf_clean)+1)+')\n')
+    #compile SM
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
 
 elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
@@ -527,15 +527,15 @@ elif assim_mod == 'snotel':
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
     delta = 5
     sample = swe.iloc[::delta,:]
-#     make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
-#     #edit .inc file
-#     replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(sample)+1)+')\n')
-#     #compile SM        
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel 
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    make_SMassim_file_snotel(sample,SNOTELgdf,outFpath)
+    #edit .inc file
+    replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(sample)+1)+')\n')
+    #compile SM
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+     #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
 
 elif assim_mod == 'both':
     print('Creating assim input file using CSO & SNOTEL observations')
@@ -564,24 +564,24 @@ elif assim_mod == 'both':
         SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
         newSTswe = STswe[STswe.index.isin(newCSO.dt)]
-#         num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
-#         #edit .inc file
-#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+        num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+        #edit .inc file
+        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
     else:
         print('No CSO observations. Creating assim input file using SNOTEL observations')
         snotel_gdf = get_snotel_stns(domain)
         SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
         newSTswe = STswe.iloc[::delta,:]
-#         make_SMassim_file_snotel(newSTswe,newST,outFpath)
-#         #edit .inc file
-#         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
+        make_SMassim_file_snotel(newSTswe,newST,outFpath)
+         #edit .inc file
+        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
 #     #compile SM
-#     get_ipython().run_line_magic('cd', '$codepath')
-#     get_ipython().system(' ./compile_snowmodel.script')
-#     #run snowmodel
-#     get_ipython().run_line_magic('cd', '$SMpath')
-#     get_ipython().system(' ./snowmodel')
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
 else:
     print("No valid assim mode was entered. Select 'cso', 'snotel' or 'both'.")
  
