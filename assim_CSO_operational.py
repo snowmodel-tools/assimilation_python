@@ -43,7 +43,7 @@ ed_dt = '2019-01-05'
 
 # ASSIM OPTIONS
 # select the data source to be assimilated
-# can be set to 'cso', 'both' or 'snotel'
+# can be set to 'none','cso', 'both' or 'snotel'
 assim_mod = 'both'
 print(assim_mod)
 #########################################################################
@@ -440,7 +440,10 @@ def make_SMassim_file_both(STswe,STmeta,CSOdata,outFpath):
 
         date = str(y)+' '+str(m)+' '+str(d)
 
-        stn_count = len(stn) + len(CSOhoy)
+        if len(SThoy)>0:
+            stn_count = len(stn) + len(CSOhoy)
+        else:
+            stn_count = len(CSOhoy)
         
         if stn_count > 0:
             f.write(date+' \n')
@@ -502,7 +505,17 @@ outFpath = SMpath+'swe_assim/swe_obs_test.dat'
 codepath = SMpath+'/code/'
 incFile = SMpath+'code/snowmodel.inc'
 
-if assim_mod == 'cso':
+if assim_mod == 'none':
+    print('Executing SnowModel without assimilation')
+    replace_line(parFile,35,'0			!irun_data_assim - 0 for straight run; 1 for assim run\n')      
+    #compile SM
+    get_ipython().run_line_magic('cd', '$codepath')
+    get_ipython().system(' ./compile_snowmodel.script')
+    #run snowmodel
+    get_ipython().run_line_magic('cd', '$SMpath')
+    get_ipython().system(' ./snowmodel')
+    
+elif assim_mod == 'cso':
     CSOgdf = get_cso(stdt, eddt, domain)
     if len(CSOgdf) < 1:
         print('Executing SnowModel without assimilation')
@@ -523,6 +536,7 @@ if assim_mod == 'cso':
 
 elif assim_mod == 'snotel':
     print('Creating assim input file using SNOTEL observations')
+    replace_line(parFile,35,'1			!irun_data_assim - 0 for straight run; 1 for assim run\n')
     snotel_gdf = get_snotel_stns(domain)
     SNOTELgdf, swe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
     delta = 5
@@ -547,23 +561,11 @@ elif assim_mod == 'both':
         CSOgdf_clean = qaqc_iqr(CSOgdf)  
         CSOdata = CSOgdf_clean.sort_values(by='dt',ascending=True)
         CSOdata = CSOdata.reset_index(drop=True)
-        # index list
-        idx = [0]
-        st = CSOdata.dt[0]
-        for i in range(1,len(CSOdata)-1):
-            date = CSOdata.dt.iloc[i]
-            gap = (date - st).days
-            if gap<=delta:
-                continue
-            else:
-                idx.append(i)
-                st = date
-        newCSO = CSOdata[CSOdata.index.isin(idx)]
-
+        newCSO = CSOdata
         snotel_gdf = get_snotel_stns(domain)
         SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
-        newSTswe = STswe[STswe.index.isin(newCSO.dt)]
+        newSTswe = STswe.iloc[::delta,:]
         num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
         #edit .inc file
         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
@@ -582,6 +584,6 @@ elif assim_mod == 'both':
     #run snowmodel
     get_ipython().run_line_magic('cd', '$SMpath')
     get_ipython().system(' ./snowmodel')
+
 else:
-    print("No valid assim mode was entered. Select 'cso', 'snotel' or 'both'.")
- 
+    print("No valid assim mode was entered. Select 'none','cso', 'snotel' or 'both'.")
