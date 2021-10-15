@@ -23,7 +23,7 @@ from collections import OrderedDict
 
 # DOMAIN
 # choose the modeling domain
-domain = 'NH'
+domain = 'CO_S'
 
 # PATHS
 dataPath = '/nfs/attic/dfh/Aragon2/CSOdmn/'+domain+'/'
@@ -565,7 +565,7 @@ elif assim_mod == 'both':
         snotel_gdf = get_snotel_stns(domain)
         SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
-        newSTswe = STswe.iloc[::delta,:]
+        newSTswe = STswe
         num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
         #edit .inc file
         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
@@ -574,7 +574,7 @@ elif assim_mod == 'both':
         snotel_gdf = get_snotel_stns(domain)
         SNOTELgdf, STswe = get_snotel_data(snotel_gdf,stdt,eddt,'WTEQ',domain)
         newST = SNOTELgdf
-        newSTswe = STswe.iloc[::delta,:]
+        newSTswe = STswe
         make_SMassim_file_snotel(newSTswe,newST,outFpath)
          #edit .inc file
         replace_line(incFile, 30, '      parameter (max_obs_dates='+str(len(newSTswe)+1)+')\n')
