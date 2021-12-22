@@ -16,8 +16,7 @@ import datetime
 import xarray as xr
 from os import listdir
 from os.path import isfile, join
-from paths import *
-
+from pathsWY import *
 
 # In[ ]:
 
@@ -51,7 +50,7 @@ def get_snotel(Bbox, mod_proj):
     box_gdf = gpd.GeoDataFrame(geometry=[box_sgeom], crs=stn_proj)
     
     # WaterML/WOF WSDL endpoint url 
-    wsdlurl = "http://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
+    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
 
     # get dictionary of snotel sites 
     sites = ulmo.cuahsi.wof.get_sites(wsdlurl,user_cache=True)
@@ -79,6 +78,7 @@ def get_snotel(Bbox, mod_proj):
 def fetch(sitecode, variablecode, start_date, end_date):
     print(sitecode, variablecode, start_date, end_date)
     values_df = None
+    wsdlurl = "https://hydroportal.cuahsi.org/Snotel/cuahsi_1_1.asmx?WSDL"
     try:
         #Request data from the server
         site_values = ulmo.cuahsi.wof.get_values(
@@ -115,12 +115,13 @@ def get_swe(gdf,st, ed):
             stn_swe[sitecode] = swe.value
         except:
             gdf.drop(gdf.loc[gdf['code']==sitecode].index, inplace=True)     
-            
+    
+    gdf.reset_index(drop=True, inplace=True)        
     #convert SNOTEL units[in] to SnowModel units [m]
-    for sitecode in CSO_gdf.code:
+    for sitecode in gdf.code:
         # overwrite the original values (no use for the original values in inches)
         stn_swe[sitecode] = 0.0254 * stn_swe[sitecode]
-    return stn_swe
+    return gdf, stn_swe
 
 
 # In[ ]:
@@ -322,7 +323,6 @@ def SMassim_ensemble(gdf,var,path):
         'M': assimilate data from each month
         'lc': assimilate data from each land cover class
         'aspect': assimilate data from each aspect N, E, S, W
-    hoy: the date that the assim round was initiated as a string
     path: path to put all output SM .gdat files
     '''
     #create directory with initiation date for ensemble if it doesn't exist
@@ -624,7 +624,7 @@ def SMassim_ensemble_snotel(gdf,snotel_gdf,swes,var,path):
             get_ipython().system('mv $oSWEpath $nSWEpath  ')
                         
     else: #works for 'M', 'lc', 'aspect'
-        uq = np.unique(gdf[var])
+        uq = np.unique(snotel_gdf[var])
         for lab in uq:
             new = snotel_gdf[snotel_gdf[var] == lab]
             if len(new) == 0:
@@ -646,7 +646,209 @@ def SMassim_ensemble_snotel(gdf,snotel_gdf,swes,var,path):
                 get_ipython().system('mv $oSWEpath $nSWEpath     ')
 
 
-# In[ ]:
+def SMassim_ensemble_both(STswe,STmeta,CSOdata,var,path):
+    '''
+        STmeta: this is the geodataframe containing all snotel stations
+        STswe: this is a dataframe containing all snotel swe
+        CSOdata: this is the geodataframe containing all CSO data
+        var: this is the landscape characteristic that will be made into an assimilation ensemble
+        'all': assimilate all inputs to SM
+        'elev': assimilate each of n elevation bands.
+        Default = breaks elevation range into 5 bands
+        'slope': assimilate each of n slope bands.
+        Default = breaks slope range into 5 bands
+        'tc': assimilate each of n terrain complexity score bands.
+        Default = breaks tc score range into 5 bands
+        'delta_day': sets a minimum number of days between assimilated observations.
+        -> only 1 observation is selected each day
+        'M': assimilate data from each month
+        'lc': assimilate data from each land cover class
+        'aspect': assimilate data from each aspect N, E, S, W
+        path: path to put all output SM .gdat files
+        '''
+    
+    #create directory with initiation date for ensemble if it doesn't exist
+    get_ipython().system('mkdir -p $path')
+    outFpath = SMpath+'swe_assim/swe_obs_test.dat'
+    if var == 'all':
+        newST = STmeta
+        newSTswe = STswe
+        newCSO = CSOdata
+        num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+        #edit .inc file
+        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+        #compile SM
+        get_ipython().run_line_magic('cd', '$codepath')
+        get_ipython().system(' ./compile_snowmodel.script')
+        #run snowmodel
+        get_ipython().run_line_magic('cd', '$SMpath')
+        get_ipython().system(' ./snowmodel')
+        #move swed.gdat file
+        oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+        nSWEpath = path + '/both_all_swed.gdat'
+        get_ipython().system('mv $oSWEpath $nSWEpath     ')
+
+    
+    elif var == 'elev':
+        edges = np.histogram_bin_edges(CSOdata.dem_elev,bins=5, range=(CSOdata.dem_elev.min(),CSOdata.dem_elev.max()))
+        print('edges:',edges)
+        labs = np.arange(0,len(edges)-1,1)
+        print('labels:',labs)
+        bins = pd.cut(STmeta['dem_elev'], edges,labels=labs)
+        STmeta['elev_bin']=bins
+        bins = pd.cut(CSOdata['dem_elev'], edges,labels=labs)
+        CSOdata['elev_bin']=bins
+        for lab in labs:
+            newST = STmeta[STmeta.elev_bin == lab]
+            newCSO = CSOdata[CSOdata.elev_bin == lab]
+            newSTswe = STswe[np.intersect1d(STswe.columns, newST.code.values)]
+            num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+            #edit .inc file
+            replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+            #compile SM
+            get_ipython().run_line_magic('cd', '$codepath')
+            get_ipython().system(' ./compile_snowmodel.script')
+            #run snowmodel
+            get_ipython().run_line_magic('cd', '$SMpath')
+            get_ipython().system(' ./snowmodel')
+            #move swed.gdat file
+            oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+            nSWEpath = path + '/both_elev_'+str(lab)+'_swed.gdat'
+            get_ipython().system('mv $oSWEpath $nSWEpath                  ')
+
+
+
+    elif var == 'slope':
+        edges = np.histogram_bin_edges(CSOdata.slope,bins=5, range=(CSOdata.slope.min(),CSOdata.slope.max()))
+        print('edges:',edges)
+        labs = np.arange(0,len(edges)-1,1)
+        print('labels:',labs)
+        bins = pd.cut(STmeta['slope'], edges,labels=labs)
+        STmeta['slope_bin']=bins
+        bins = pd.cut(CSOdata['slope'], edges,labels=labs)
+        CSOdata['slope_bin']=bins
+        for lab in labs:
+            newST = STmeta[STmeta.slope_bin == lab]
+            newCSO = CSOdata[CSOdata.slope_bin == lab]
+            newSTswe = STswe[np.intersect1d(STswe.columns, newST.code.values)]
+            num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+            #edit .inc file
+            replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+            #compile SM
+            get_ipython().run_line_magic('cd', '$codepath')
+            get_ipython().system(' ./compile_snowmodel.script')
+            #run snowmodel
+            get_ipython().run_line_magic('cd', '$SMpath')
+            get_ipython().system(' ./snowmodel')
+            #move swed.gdat file
+            oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+            nSWEpath = path + '/both_slope_'+str(lab)+'_swed.gdat'
+            get_ipython().system('mv $oSWEpath $nSWEpath                                 ')
+
+    elif var == 'tc':
+        edges = np.histogram_bin_edges(CSOdata.tc,bins=5, range=(CSOdata.tc.min(),CSOdata.tc.max()))
+        print('edges:',edges)
+        labs = np.arange(0,len(edges)-1,1)
+        print('labels:',labs)
+        bins = pd.cut(STmeta['tc'], edges,labels=labs)
+        STmeta['tc_bin']=bins
+        bins = pd.cut(CSOdata['tc'], edges,labels=labs)
+        CSOdata['tc_bin']=bins
+        for lab in labs:
+            newST = STmeta[STmeta.tc_bin == lab]
+            newCSO = CSOdata[CSOdata.tc_bin == lab]
+            newSTswe = STswe[np.intersect1d(STswe.columns, newST.code.values)]
+            num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+            #edit .inc file
+            replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+            #compile SM
+            get_ipython().run_line_magic('cd', '$codepath')
+            get_ipython().system(' ./compile_snowmodel.script')
+            #run snowmodel
+            get_ipython().run_line_magic('cd', '$SMpath')
+            get_ipython().system(' ./snowmodel')
+            #move swed.gdat file
+            oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+            nSWEpath = path + '/both_tc_'+str(lab)+'_swed.gdat'
+            get_ipython().system('mv $oSWEpath $nSWEpath     ')
+
+
+    elif var == 'delta_day':
+        import datetime
+        CSOdata = CSOdata.sort_values(by='dt',ascending=True)
+        CSOdata = CSOdata.reset_index(drop=True)
+        newST = STmeta
+        Delta = [3,5,7,10]
+        for dels in Delta:
+            idx = [0]
+            st = CSOdata.dt[0]
+            for i in range(1,len(CSOdata)-1):
+                date = CSOdata.dt.iloc[i]
+                gap = (date - st).days
+                if gap<=dels:
+                    continue
+                else:
+                    idx.append(i)
+                    st = date
+        newCSO = CSOdata[CSOdata.index.isin(idx)]
+        newSTswe = STswe[STswe.index.isin(newCSO.dt.dt.date)]
+        num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+        #edit .inc file
+        replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+        #compile SM
+        get_ipython().run_line_magic('cd', '$codepath')
+        get_ipython().system(' ./compile_snowmodel.script')
+        #run snowmodel
+        get_ipython().run_line_magic('cd', '$SMpath')
+        get_ipython().system(' ./snowmodel')
+        #move swed.gdat file
+        oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+        nSWEpath = path + '/both_day_delta'+str(dels)+'_swed.gdat'
+        get_ipython().system('mv $oSWEpath $nSWEpath            ')
+
+
+    elif var == 'M':
+        newST = STmeta
+        mo = [11,12,1,2,3,4,5]#np.unique(STswe.index.month)
+        for m in mo:
+            newSTswe = STswe[STswe.index.month == m]
+            newCSO = CSOdata[CSOdata[var] == m]
+            num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+            #edit .inc file
+            replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+            #compile SM
+            get_ipython().run_line_magic('cd', '$codepath')
+            get_ipython().system(' ./compile_snowmodel.script')
+            #run snowmodel
+            get_ipython().run_line_magic('cd', '$SMpath')
+            get_ipython().system(' ./snowmodel')
+            #move swed.gdat file
+            oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+            nSWEpath = path + '/both_M_'+str(m)+'_swed.gdat'
+            get_ipython().system('mv $oSWEpath $nSWEpath  ')
+
+
+
+    else: #works for 'M', 'lc', 'aspect'
+        uq = np.unique(np.concatenate((STmeta[var].values,CSOdata[var].values)))
+        for lab in uq:
+            newST = STmeta[STmeta[var] == lab]
+            newCSO = CSOdata[CSOdata[var] == lab]
+            newSTswe = STswe[np.intersect1d(STswe.columns, newST.code.values)]
+            num_obs = make_SMassim_file_both(newSTswe,newST,newCSO,outFpath)
+            #edit .inc file
+            replace_line(incFile, 30, '      parameter (max_obs_dates='+str(num_obs+1)+')\n')
+            #compile SM
+            get_ipython().run_line_magic('cd', '$codepath')
+            get_ipython().system(' ./compile_snowmodel.script')
+            #run snowmodel
+            get_ipython().run_line_magic('cd', '$SMpath')
+            get_ipython().system(' ./snowmodel')
+            #move swed.gdat file
+            oSWEpath = SMpath + 'outputs/wi_assim/swed.gdat'
+            nSWEpath = path + '/both_'+var+'_'+str(lab)+'_swed.gdat'
+            get_ipython().system('mv $oSWEpath $nSWEpath     ')
+
 
 
 # function to extract point index from gridded data
